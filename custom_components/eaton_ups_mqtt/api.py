@@ -55,6 +55,12 @@ class EatonUpsClientAuthenticationError(
     """Exception to indicate an authentication error."""
 
 
+class EatonUpsServerCertificateError(
+    EatonUpsClientAuthenticationError,
+):
+    """Exception to indicate the server certificate does not match the pin."""
+
+
 class EatonUpsMqttClient:
     """Eaton UPS MQTT API Client."""
 
@@ -157,8 +163,24 @@ class EatonUpsMqttClient:
             msg = f"TLS setup failed for {self._host}:{self._port}: {e}"
             raise EatonUpsClientAuthenticationError(msg) from e
 
-        # Connect to MQTT broker
-        self._mqtt_client.connect_async(host=self._host, port=self._port)
+        # Connect in the executor so TLS and socket errors raise here. With
+        # connect_async the paho network thread catches them and retries.
+        try:
+            await loop.run_in_executor(
+                None,
+                partial(self._mqtt_client.connect, host=self._host, port=self._port),
+            )
+        except ssl.SSLCertVerificationError as e:
+            self._cleanup_temp_files()
+            msg = (
+                f"Server certificate of {self._host}:{self._port}"
+                f" does not match the pinned certificate: {e}"
+            )
+            raise EatonUpsServerCertificateError(msg) from e
+        except OSError as e:
+            self._cleanup_temp_files()
+            msg = f"Failed to connect to MQTT broker at {self._host}:{self._port}: {e}"
+            raise EatonUpsClientCommunicationError(msg) from e
         self._mqtt_client.loop_start()
 
         # Wait for connection to establish
