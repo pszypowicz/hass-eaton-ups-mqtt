@@ -9,7 +9,7 @@
                 }
             },
             "reauth_confirm": {
-                "description": "Re-authenticate your Eaton UPS connection. Leave certificate fields empty to auto-generate new certificates.",
+                "description": "Re-authenticate your Eaton UPS connection. Leave certificate fields empty to auto-generate new certificates. If the UPS created a new server certificate, clear only the Server Certificate field so that the client certificate on the UPS stays valid.",
                 "data": {
                     "host": "Host",
                     "port": "Port",

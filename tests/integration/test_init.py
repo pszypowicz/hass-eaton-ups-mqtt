@@ -12,7 +12,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.issue_registry import async_get as async_get_issue_registry
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.eaton_ups_mqtt.api import EatonUpsClientCommunicationError
+from custom_components.eaton_ups_mqtt.api import (
+    EatonUpsClientAuthenticationError,
+    EatonUpsClientCommunicationError,
+    EatonUpsServerCertificateError,
+)
 from custom_components.eaton_ups_mqtt.const import (
     CONF_CLIENT_CERT,
     CONF_CLIENT_KEY,
@@ -235,6 +239,60 @@ class TestSetupEntry:
             await hass.async_block_till_done()
 
         assert mock_entry.state == ConfigEntryState.SETUP_RETRY
+
+    async def test_setup_server_cert_mismatch_starts_reauth(
+        self,
+        hass: HomeAssistant,
+        mock_entry,
+    ):
+        """Test a server cert mismatch starts reauth and skips the upload issue."""
+        mock_entry.add_to_hass(hass)
+
+        with patch(
+            "custom_components.eaton_ups_mqtt.EatonUpsMqttClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.async_setup = AsyncMock(
+                side_effect=EatonUpsServerCertificateError("Certificate changed")
+            )
+            mock_client.async_disconnect = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            await hass.config_entries.async_setup(mock_entry.entry_id)
+            await hass.async_block_till_done()
+
+        assert mock_entry.state == ConfigEntryState.SETUP_ERROR
+        flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert [flow["context"]["source"] for flow in flows] == ["reauth"]
+        issue_registry = async_get_issue_registry(hass)
+        issue_id = f"cert_upload_{mock_entry.entry_id}"
+        assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+    async def test_setup_client_auth_failure_creates_upload_issue(
+        self,
+        hass: HomeAssistant,
+        mock_entry,
+    ):
+        """Test a client authentication failure creates the upload issue."""
+        mock_entry.add_to_hass(hass)
+
+        with patch(
+            "custom_components.eaton_ups_mqtt.EatonUpsMqttClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.async_setup = AsyncMock(
+                side_effect=EatonUpsClientAuthenticationError("TLS setup failed")
+            )
+            mock_client.async_disconnect = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            await hass.config_entries.async_setup(mock_entry.entry_id)
+            await hass.async_block_till_done()
+
+        assert mock_entry.state == ConfigEntryState.SETUP_ERROR
+        issue_registry = async_get_issue_registry(hass)
+        issue_id = f"cert_upload_{mock_entry.entry_id}"
+        assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
 
 class TestUnloadEntry:

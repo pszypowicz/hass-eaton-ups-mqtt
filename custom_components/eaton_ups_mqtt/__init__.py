@@ -29,6 +29,7 @@ from .api import (
     EatonUpsClientAuthenticationError,
     EatonUpsMqttClient,
     EatonUpsMqttConfig,
+    EatonUpsServerCertificateError,
 )
 from .certificates import (
     async_fetch_server_certificate,
@@ -142,7 +143,11 @@ async def async_setup_entry(
     except Exception as err:
         # Only show cert upload instructions for authentication/TLS errors
         cause = err.__cause__ or err
-        if isinstance(cause, EatonUpsClientAuthenticationError):
+        if isinstance(cause, EatonUpsServerCertificateError):
+            # The reauth flow re-pins the server certificate. Uploading the
+            # client certificate again does not fix a server-side change.
+            LOGGER.error("Server certificate of UPS at %s changed: %s", host, cause)
+        elif isinstance(cause, EatonUpsClientAuthenticationError):
             _create_cert_upload_issue(hass, entry, host, issue_id)
         else:
             LOGGER.error("Failed to connect to UPS at %s: %s", host, err)
