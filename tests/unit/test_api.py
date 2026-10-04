@@ -489,6 +489,30 @@ class TestAsyncSetupErrors:
             ):
                 await mqtt_client.async_setup()
 
+    @pytest.mark.asyncio
+    async def test_setup_connect_os_error_raises_comm_error(self, mqtt_client):
+        """Test a socket error on connect raises a communication error at once."""
+        mock_client = MagicMock()
+        mock_client.connect.side_effect = ConnectionRefusedError("refused")
+
+        with (
+            patch("paho.mqtt.client.Client", return_value=mock_client),
+            patch.object(
+                mqtt_client,
+                "_create_temp_cert_files",
+                new_callable=AsyncMock,
+                return_value=["/tmp/ca", "/tmp/cert", "/tmp/key"],
+            ),
+            patch.object(mqtt_client, "_cleanup_temp_files") as mock_cleanup,
+        ):
+            mqtt_client._mqtt_client = None
+
+            with pytest.raises(EatonUpsClientCommunicationError, match="refused"):
+                await mqtt_client.async_setup()
+
+        mock_cleanup.assert_called_once()
+        mock_client.loop_start.assert_not_called()
+
 
 class TestPrefixDetection:
     """Tests for MQTT prefix auto-detection."""
